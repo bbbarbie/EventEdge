@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(eventedge
     src/main.cpp
+    src/market_maker.cpp
     src/order_book.cpp
 )
 

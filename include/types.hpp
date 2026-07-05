@@ -63,7 +63,11 @@ struct PnLComponents {
 };
 
 struct SimConfig {
+    double true_prob_init = 0.6;
     double true_probability = 0.6;
+    double base_spread = 0.04;
+    double calibration_bias = 0.0;
+    double transaction_cost = 0.0;
     double initial_cash = 0.0;
     int initial_inventory = 0;
     int quote_size = 1;
