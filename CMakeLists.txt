@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(eventedge
+    src/event_probability.cpp
     src/main.cpp
     src/market_maker.cpp
     src/order_book.cpp
