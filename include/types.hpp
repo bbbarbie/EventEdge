@@ -71,6 +71,7 @@ struct SimConfig {
     double transaction_cost = 0.0;
     double signal_noise_pub = 0.05;
     double signal_noise_priv = 0.02;
+    double informed_fraction = 0.10;
     double initial_cash = 0.0;
     int initial_inventory = 0;
     int quote_size = 1;

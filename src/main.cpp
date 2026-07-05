@@ -1,29 +1,61 @@
 #include <iostream>
 
-#include "event_probability.hpp"
+#include "trader_agents.hpp"
 #include "types.hpp"
+
+namespace {
+
+const char* trader_type_to_string(TraderType trader_type) {
+    switch (trader_type) {
+        case TraderType::NOISE:
+            return "NOISE";
+        case TraderType::VALUE:
+            return "VALUE";
+        case TraderType::INFORMED:
+            return "INFORMED";
+        case TraderType::NONE:
+            return "NONE";
+    }
+
+    return "UNKNOWN";
+}
+
+const char* side_to_string(Side side) {
+    switch (side) {
+        case Side::BUY:
+            return "BUY";
+        case Side::SELL:
+            return "SELL";
+    }
+
+    return "UNKNOWN";
+}
+
+}  // namespace
 
 int main() {
     SimConfig config;
-    config.true_prob_init = 0.60;
-    config.signal_noise_pub = 0.05;
-    config.signal_noise_priv = 0.02;
+    config.informed_fraction = 0.50;
     config.random_seed = 42;
 
-    EventProbabilityProcess event_probability(config);
+    TraderAgents trader_agents(config);
+
+    Quote quote;
+    quote.bid = 0.58;
+    quote.ask = 0.62;
+
     std::cout << "EventEdge simulator initialized.\n";
-    std::cout << "Initial true probability: " << event_probability.true_prob() << '\n';
+    std::cout << "Quote: bid=" << quote.bid << ", ask=" << quote.ask << '\n';
 
-    for (int t = 1; t <= 10; ++t) {
-        event_probability.step();
-        std::cout << "t=" << t
-                  << ", true_prob=" << event_probability.true_prob()
-                  << ", public_signal=" << event_probability.public_signal()
-                  << ", private_signal=" << event_probability.private_signal() << '\n';
+    for (int t = 1; t <= 20; ++t) {
+        const auto order = trader_agents.generate_order(t, 0.60, 0.70, quote);
+        if (order.has_value()) {
+            std::cout << "t=" << t
+                      << ", trader_type=" << trader_type_to_string(order->trader_type)
+                      << ", side=" << side_to_string(order->side)
+                      << ", quantity=" << order->quantity << '\n';
+        }
     }
-
-    event_probability.inject_shock(0.10);
-    std::cout << "After shock true probability: " << event_probability.true_prob() << '\n';
 
     return 0;
 }

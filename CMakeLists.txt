@@ -11,6 +11,7 @@ add_executable(eventedge
     src/main.cpp
     src/market_maker.cpp
     src/order_book.cpp
+    src/trader_agents.cpp
 )
 
 target_include_directories(eventedge PRIVATE include)
