@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 enum class Side {
     BUY,
@@ -68,9 +69,12 @@ struct SimConfig {
     double base_spread = 0.04;
     double calibration_bias = 0.0;
     double transaction_cost = 0.0;
+    double signal_noise_pub = 0.05;
+    double signal_noise_priv = 0.02;
     double initial_cash = 0.0;
     int initial_inventory = 0;
     int quote_size = 1;
     int num_steps = 0;
+    std::uint32_t random_seed = 42;
     MMStrategy mm_strategy = MMStrategy::FIXED_SPREAD;
 };
