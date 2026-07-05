@@ -40,6 +40,7 @@ struct Fill {
     Side side = Side::BUY;
     double price = 0.0;
     int quantity = 0;
+    int mm_inventory_change = 0;
     TraderType trader_type = TraderType::NONE;
     double timestamp = 0.0;
 };
