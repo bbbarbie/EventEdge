@@ -1,5 +1,8 @@
 build/
-data/*.csv
+data/
+results/bias_sweep_runs.csv
+results/inventory_aware_runs.csv
+results/markouts_per_fill.csv
 .DS_Store
 .vscode/
 __pycache__/
