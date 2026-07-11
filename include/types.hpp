@@ -20,6 +20,15 @@ enum class OrderType {
     LIMIT
 };
 
+enum class ProbProcess {
+    // Gaussian random walk clamped to [0.01, 0.99]. Simple, but clamping
+    // induces drift toward the interior (not a martingale near bounds).
+    CLAMPED_ADDITIVE,
+    // State-dependent volatility: dp = vol * p(1-p) * Z. A true martingale
+    // that stays in (0, 1) naturally, so settlement risk is mean-zero.
+    LOGISTIC_MARTINGALE
+};
+
 enum class MMStrategy {
     FIXED_SPREAD,
     INVENTORY_AWARE,
@@ -72,10 +81,12 @@ struct SimConfig {
     double signal_noise_pub = 0.05;
     double signal_noise_priv = 0.02;
     double informed_fraction = 0.10;
+    double inventory_aversion = 0.0;  // quote-center shift per contract of inventory
     double initial_cash = 0.0;
     int initial_inventory = 0;
     int quote_size = 1;
     int num_steps = 0;
     std::uint32_t random_seed = 42;
     MMStrategy mm_strategy = MMStrategy::FIXED_SPREAD;
+    ProbProcess prob_process = ProbProcess::CLAMPED_ADDITIVE;
 };

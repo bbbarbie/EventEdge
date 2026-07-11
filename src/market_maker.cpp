@@ -27,11 +27,18 @@ Quote MarketMaker::compute_quote(double public_signal, int timestamp) {
     quote.ask_size = config_.quote_size;
     quote.timestamp = timestamp;
 
-    if (config_.mm_strategy == MMStrategy::FIXED_SPREAD) {
-        const double half_spread = config_.base_spread / 2.0;
-        quote.bid = clamp_probability(estimated_prob_ - half_spread);
-        quote.ask = clamp_probability(estimated_prob_ + half_spread);
+    const double half_spread = config_.base_spread / 2.0;
+    double quote_center = estimated_prob_;
+
+    if (config_.mm_strategy == MMStrategy::INVENTORY_AWARE) {
+        // Long inventory shifts quotes down so traders buy from the MM and
+        // reduce its position; short inventory shifts quotes up.
+        quote_center = clamp_probability(
+            estimated_prob_ - config_.inventory_aversion * inventory_);
     }
+
+    quote.bid = clamp_probability(quote_center - half_spread);
+    quote.ask = clamp_probability(quote_center + half_spread);
 
     return quote;
 }
