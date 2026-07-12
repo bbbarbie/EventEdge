@@ -1,6 +1,6 @@
 # EventEdge
 
-**Calibration error and adverse selection in event-contract market making.**
+**Informed flow amplifies the cost of calibration error**
 
 EventEdge is a C++ simulator (with a Python experiment layer) for market making in binary event contracts — instruments that pay $1 if an event occurs and $0 otherwise, so price is implied probability. It studies one question:
 
