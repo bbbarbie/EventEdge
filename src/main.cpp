@@ -2,8 +2,11 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <random>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include "event_probability.hpp"
 #include "market_maker.hpp"
@@ -31,11 +34,76 @@ const char* side_to_string(Side side) {
     return side == Side::BUY ? "BUY" : "SELL";
 }
 
+// Reads a replay path from a CSV written by python/kalshi.py (or any file
+// with a `latent_probability` column, e.g. a previous run's _steps.csv).
+// Without a header the last column is taken. Returns nullopt on failure and
+// reports why on stderr.
+std::optional<std::vector<double>> read_prob_path(const std::string& file) {
+    std::ifstream in(file);
+    if (!in) {
+        std::cerr << "Cannot open --prob-path file: " << file << '\n';
+        return std::nullopt;
+    }
+    std::vector<double> path;
+    std::string line;
+    int column = -1;  // resolved from the header, else last column
+    std::size_t line_no = 0;
+    while (std::getline(in, line)) {
+        ++line_no;
+        if (line.empty() || line.back() == '\r') {
+            if (!line.empty()) line.pop_back();
+            if (line.empty()) continue;
+        }
+        std::vector<std::string> cells;
+        std::stringstream ss(line);
+        std::string cell;
+        while (std::getline(ss, cell, ',')) cells.push_back(cell);
+        if (line_no == 1) {
+            for (std::size_t i = 0; i < cells.size(); ++i) {
+                if (cells[i] == "latent_probability") column = static_cast<int>(i);
+            }
+            bool numeric = true;
+            try { std::stod(cells.front()); } catch (...) { numeric = false; }
+            if (!numeric) continue;  // header row
+        }
+        const std::size_t idx = column >= 0 ? static_cast<std::size_t>(column)
+                                            : cells.size() - 1;
+        if (idx >= cells.size()) {
+            std::cerr << "--prob-path line " << line_no << ": too few columns\n";
+            return std::nullopt;
+        }
+        double value = 0.0;
+        try {
+            value = std::stod(cells[idx]);
+        } catch (...) {
+            std::cerr << "--prob-path line " << line_no << ": not a number: "
+                      << cells[idx] << '\n';
+            return std::nullopt;
+        }
+        if (!(value >= 0.0 && value <= 1.0)) {
+            std::cerr << "--prob-path line " << line_no
+                      << ": probability out of [0, 1]: " << value << '\n';
+            return std::nullopt;
+        }
+        path.push_back(value);
+    }
+    if (path.empty()) {
+        std::cerr << "--prob-path file has no rows: " << file << '\n';
+        return std::nullopt;
+    }
+    return path;
+}
+
 }  // namespace
 
 // Usage: eventedge [--seed N] [--steps N] [--out-prefix PATH]
 //                  [--bias X] [--informed-fraction X] [--spread X]
 //                  [--noise-pub X] [--noise-priv X] [--log-detail 0|1]
+//                  [--prob-path FILE] [--outcome yes|no|draw]
+//
+// --prob-path replays a real probability path (python/kalshi.py) as the
+// latent truth; --steps then defaults to the path length. --outcome forces
+// the settlement (a settled Kalshi market's result) instead of drawing it.
 //
 // Writes <prefix>_summary.csv always; <prefix>_steps.csv and
 // <prefix>_fills.csv only when --log-detail is 1 (the default).
@@ -44,6 +112,9 @@ int main(int argc, char** argv) {
     config.num_steps = 2000;
     std::string out_prefix = "run";
     bool log_detail = true;
+    bool steps_given = false;
+    std::string prob_path_file;
+    std::optional<int> forced_outcome;
 
     for (int i = 1; i + 1 < argc; i += 2) {
         const std::string flag = argv[i];
@@ -52,6 +123,7 @@ int main(int argc, char** argv) {
             config.random_seed = static_cast<std::uint32_t>(std::stoul(value));
         } else if (flag == "--steps") {
             config.num_steps = std::stoi(value);
+            steps_given = true;
         } else if (flag == "--out-prefix") {
             out_prefix = value;
         } else if (flag == "--bias") {
@@ -80,8 +152,23 @@ int main(int argc, char** argv) {
                 config.prob_process = ProbProcess::CLAMPED_ADDITIVE;
             } else if (value == "martingale") {
                 config.prob_process = ProbProcess::LOGISTIC_MARTINGALE;
+            } else if (value == "replay") {
+                config.prob_process = ProbProcess::REPLAY;
             } else {
                 std::cerr << "Unknown --prob-process: " << value << '\n';
+                return 1;
+            }
+        } else if (flag == "--prob-path") {
+            prob_path_file = value;
+        } else if (flag == "--outcome") {
+            if (value == "yes" || value == "1") {
+                forced_outcome = 1;
+            } else if (value == "no" || value == "0") {
+                forced_outcome = 0;
+            } else if (value == "draw") {
+                forced_outcome.reset();
+            } else {
+                std::cerr << "Unknown --outcome: " << value << " (yes|no|draw)\n";
                 return 1;
             }
         } else if (flag == "--log-detail") {
@@ -90,6 +177,24 @@ int main(int argc, char** argv) {
             std::cerr << "Unknown flag: " << flag << '\n';
             return 1;
         }
+    }
+
+    std::vector<double> prob_path;
+    if (!prob_path_file.empty()) {
+        auto loaded = read_prob_path(prob_path_file);
+        if (!loaded) return 1;
+        prob_path = std::move(*loaded);
+        config.prob_process = ProbProcess::REPLAY;
+        if (!steps_given) {
+            config.num_steps = static_cast<int>(prob_path.size());
+        } else if (config.num_steps > static_cast<int>(prob_path.size())) {
+            std::cerr << "--steps " << config.num_steps << " exceeds the "
+                      << prob_path.size() << " rows in " << prob_path_file << '\n';
+            return 1;
+        }
+    } else if (config.prob_process == ProbProcess::REPLAY) {
+        std::cerr << "--prob-process replay needs --prob-path FILE\n";
+        return 1;
     }
 
     if (config.num_steps <= 0 || config.base_spread < 0.0 ||
@@ -108,6 +213,9 @@ int main(int argc, char** argv) {
     trader_config.random_seed = config.random_seed * 3u + 2u;
 
     EventProbabilityProcess prob_process(prob_config);
+    if (!prob_path.empty()) {
+        prob_process.set_replay_path(prob_path);
+    }
     TraderAgents trader_agents(trader_config);
     MarketMaker market_maker(config);
     OrderBook order_book;
@@ -196,16 +304,21 @@ int main(int argc, char** argv) {
     }
 
     // 5. settlement: draw outcome from terminal latent probability
+    // A forced outcome is a real market's settlement; the draw still runs so
+    // the RNG stream (and therefore the seed's meaning) is unchanged either way.
     const double terminal_prob = prob_process.true_prob();
     std::bernoulli_distribution outcome_dist(terminal_prob);
-    const int event_outcome = outcome_dist(settlement_rng) ? 1 : 0;
+    const int drawn_outcome = outcome_dist(settlement_rng) ? 1 : 0;
+    const int event_outcome = forced_outcome.value_or(drawn_outcome);
+    const char* outcome_source = forced_outcome ? "forced" : "draw";
     const double terminal_pnl = market_maker.cash()
         + market_maker.inventory() * static_cast<double>(event_outcome)
         - market_maker.fees_paid();
 
     const char* process_name =
-        config.prob_process == ProbProcess::LOGISTIC_MARTINGALE
-            ? "martingale" : "additive";
+        config.prob_process == ProbProcess::LOGISTIC_MARTINGALE ? "martingale"
+        : config.prob_process == ProbProcess::REPLAY            ? "replay"
+                                                                : "additive";
     const char* strategy_name =
         config.mm_strategy == MMStrategy::INVENTORY_AWARE ? "inventory" : "fixed";
     summary_out << "seed,num_steps,calibration_bias,informed_fraction,"
@@ -213,7 +326,8 @@ int main(int argc, char** argv) {
                    "mm_strategy,inventory_aversion,prob_process,"
                    "terminal_probability,event_outcome,fill_count,"
                    "informed_fill_count,value_fill_count,noise_fill_count,"
-                   "terminal_cash,terminal_inventory,terminal_pnl\n";
+                   "terminal_cash,terminal_inventory,terminal_pnl,"
+                   "outcome_source,prob_path\n";
     summary_out << config.random_seed << ',' << config.num_steps << ','
                 << config.calibration_bias << ',' << config.informed_fraction << ','
                 << config.base_spread << ',' << config.signal_noise_pub << ','
@@ -225,7 +339,8 @@ int main(int argc, char** argv) {
                 << informed_fill_count << ',' << value_fill_count << ','
                 << noise_fill_count << ','
                 << market_maker.cash() << ','
-                << market_maker.inventory() << ',' << terminal_pnl << '\n';
+                << market_maker.inventory() << ',' << terminal_pnl << ','
+                << outcome_source << ',' << prob_path_file << '\n';
 
     std::cout << "seed=" << config.random_seed
               << " steps=" << config.num_steps

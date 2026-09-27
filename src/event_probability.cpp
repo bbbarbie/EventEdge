@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <random>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -37,10 +39,32 @@ EventProbabilityProcess::EventProbabilityProcess(const SimConfig& config)
     process_type_ = config.prob_process;
 }
 
+void EventProbabilityProcess::set_replay_path(std::vector<double> path) {
+    replay_path_ = std::move(path);
+    replay_index_ = 0;
+    process_type_ = ProbProcess::REPLAY;
+    if (!replay_path_.empty()) {
+        p_true_ = clamp_probability(replay_path_.front());
+    }
+}
+
+std::size_t EventProbabilityProcess::replay_length() const {
+    return replay_path_.size();
+}
+
+std::size_t EventProbabilityProcess::replay_position() const {
+    return replay_index_;
+}
+
 void EventProbabilityProcess::step() {
     double next_prob = p_true_;
 
-    if (process_type_ == ProbProcess::LOGISTIC_MARTINGALE) {
+    if (process_type_ == ProbProcess::REPLAY) {
+        // Real markets carry their own jumps and vol; nothing is added here.
+        if (replay_index_ < replay_path_.size()) {
+            next_prob = replay_path_[replay_index_++];
+        }
+    } else if (process_type_ == ProbProcess::LOGISTIC_MARTINGALE) {
         const double scale = p_true_ * (1.0 - p_true_);
         next_prob += kMartingaleVol * scale * unit_normal_(rng_);
         if (shock_event_dist_(rng_)) {
