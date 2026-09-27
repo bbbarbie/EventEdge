@@ -421,6 +421,136 @@ void test_replay_process_is_seed_independent() {
     }
 }
 
+// Kalshi's fee is a share of p(1-p) per contract, rounded up to the cent
+// per fill. It must reduce terminal P&L by exactly that and nothing else.
+void test_kalshi_shaped_fee() {
+    SimConfig config = test_config();
+    config.fee_rate = 0.07;
+    config.fee_round_cents = true;
+    MarketMaker mm(config);
+    Fill fill;
+    fill.side = Side::BUY;
+    fill.price = 0.50;
+    fill.quantity = 1;
+    fill.mm_inventory_change = -1;
+    mm.process_fill(fill, 0.5);
+    // 0.07 * 0.25 = 0.0175 -> rounds up to 0.02
+    CHECK_NEAR(mm.fees_paid(), 0.02, 1e-12);
+    CHECK_NEAR(mm.cash(), 0.50, 1e-12);
+    CHECK_NEAR(mm.realized_pnl(), 0.48, 1e-12);
+
+    fill.price = 0.90;  // 0.07 * 0.09 = 0.0063 -> 0.01
+    mm.process_fill(fill, 0.9);
+    CHECK_NEAR(mm.fees_paid(), 0.03, 1e-12);
+
+    config.fee_round_cents = false;
+    MarketMaker exact(config);
+    fill.price = 0.50;
+    exact.process_fill(fill, 0.5);
+    CHECK_NEAR(exact.fees_paid(), 0.0175, 1e-12);
+
+    config.fee_rate = 0.0;
+    MarketMaker free(config);
+    free.process_fill(fill, 0.5);
+    CHECK_NEAR(free.fees_paid(), 0.0, 0.0);
+}
+
+// With liquidity queued ahead of the MM, unit orders mostly get absorbed
+// while larger orders still reach it: the MM's fills skew toward size,
+// which is what makes a fill worse news than an order.
+void test_queue_ahead_absorbs_small_orders_first() {
+    OrderBook book;
+    Quote quote;
+    quote.bid = 0.48;
+    quote.ask = 0.52;
+    quote.bid_size = 1;
+    quote.ask_size = 1;
+    book.update_quotes(quote);
+    book.configure_queue(2.0, 11u);
+
+    Order unit;
+    unit.order_type = OrderType::MARKET;
+    unit.side = Side::BUY;
+    unit.quantity = 1;
+    Order sweep = unit;
+    sweep.quantity = 10;
+
+    int unit_fills = 0;
+    int sweep_fills = 0;
+    for (int i = 0; i < 2000; ++i) {
+        unit.id = static_cast<std::size_t>(i);
+        if (const auto fill = book.match_order(unit)) {
+            ++unit_fills;
+            CHECK(fill->quantity == 1);
+        }
+        sweep.id = static_cast<std::size_t>(i);
+        if (const auto fill = book.match_order(sweep)) {
+            ++sweep_fills;
+            CHECK(fill->quantity >= 1 && fill->quantity <= 10);  // remainder after the queue
+            CHECK(fill->mm_inventory_change == -fill->quantity);
+        }
+    }
+    // P(Poisson(2) == 0) = e^-2 ~ 0.135; P(Poisson(2) < 10) ~ 1.
+    CHECK(unit_fills > 180 && unit_fills < 360);
+    CHECK(sweep_fills > 1990);
+    CHECK(book.absorbed_count() == 4000 - unit_fills - sweep_fills);
+
+    OrderBook alone;
+    alone.update_quotes(quote);
+    CHECK(alone.match_order(unit).has_value());  // default: no queue
+    CHECK(alone.absorbed_count() == 0);
+}
+
+// Glosten-Milgrom quotes straddle the posterior mean, widen with informed
+// flow, and the posterior moves in the direction of the flow it observes.
+void test_glosten_milgrom_quotes_and_updates() {
+    SimConfig config = test_config();
+    config.mm_strategy = MMStrategy::GLOSTEN_MILGROM;
+    config.informed_fraction = 0.3;
+    MarketMaker mm(config);
+
+    const Quote q = mm.compute_quote(0.60, 1);
+    CHECK(q.bid <= q.ask);
+    CHECK(q.bid < mm.estimated_prob() && mm.estimated_prob() < q.ask);
+    CHECK_NEAR(mm.estimated_prob(), 0.60, 0.03);
+
+    config.informed_fraction = 0.6;
+    MarketMaker more_informed(config);
+    const Quote wide = more_informed.compute_quote(0.60, 1);
+    CHECK(wide.ask - wide.bid > q.ask - q.bid);
+
+    config.informed_fraction = 0.0;
+    MarketMaker no_informed(config);
+    const Quote narrow = no_informed.compute_quote(0.60, 1);
+    CHECK(narrow.ask - narrow.bid < q.ask - q.bid);
+
+    // A run of buys must lift the posterior; a run of sells must lower it.
+    MarketMaker buyer_side(config);
+    MarketMaker seller_side(config);
+    buyer_side.compute_quote(0.60, 1);
+    seller_side.compute_quote(0.60, 1);
+    for (int i = 0; i < 20; ++i) {
+        buyer_side.observe_flow(Side::BUY);
+        buyer_side.compute_quote(0.60, i + 2);
+        seller_side.observe_flow(Side::SELL);
+        seller_side.compute_quote(0.60, i + 2);
+    }
+    CHECK(buyer_side.estimated_prob() > 0.60);
+    CHECK(seller_side.estimated_prob() < 0.60);
+
+    // Quotes stay legal across the whole probability range and biases.
+    for (const double bias : {-0.3, 0.0, 0.3}) {
+        config.calibration_bias = bias;
+        config.informed_fraction = 0.5;
+        MarketMaker any(config);
+        for (const double sig : {0.01, 0.2, 0.5, 0.8, 0.99}) {
+            const Quote quote = any.compute_quote(sig, 1);
+            CHECK(quote.bid >= 0.0 && quote.ask <= 1.0 && quote.bid <= quote.ask);
+            any.observe_flow(std::nullopt);
+        }
+    }
+}
+
 void test_informed_trader_may_decline_to_trade() {
     SimConfig config = test_config();
     config.informed_fraction = 1.0;  // every arrival is informed
@@ -500,6 +630,9 @@ int main() {
     test_martingale_process_has_no_drift();
     test_replay_process_follows_path_exactly();
     test_replay_process_is_seed_independent();
+    test_kalshi_shaped_fee();
+    test_queue_ahead_absorbs_small_orders_first();
+    test_glosten_milgrom_quotes_and_updates();
     test_informed_trader_may_decline_to_trade();
     test_informed_trader_direction();
     test_seeded_runs_are_reproducible();

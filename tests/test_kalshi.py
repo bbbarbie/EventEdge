@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import os
 import subprocess
 import sys
@@ -26,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 import kalshi  # noqa: E402
+import kalshi_calibration  # noqa: E402
 
 BINARY = REPO_ROOT / "eventedge"
 if not BINARY.exists():
@@ -172,6 +174,10 @@ class ReplayThroughBinary(unittest.TestCase):
                 self.assertEqual(summary["outcome_source"], "forced")
                 self.assertEqual(summary["prob_process"], "replay")
                 self.assertAlmostEqual(float(summary["terminal_probability"]), 0.38)
+                self.assertAlmostEqual(
+                    float(summary["terminal_pnl_marked"]),
+                    float(summary["terminal_cash"]) + int(summary["terminal_inventory"]) * 0.38,
+                    places=12)
                 # accounting identity still holds with a forced outcome
                 self.assertAlmostEqual(
                     float(summary["terminal_pnl"]),
@@ -192,6 +198,86 @@ class ReplayThroughBinary(unittest.TestCase):
                 self.assertEqual(next(csv.DictReader(fh))["outcome_source"], "draw")
             missing = self.run_binary("--prob-process", "replay", "--out-prefix", str(out / "m"))
             self.assertNotEqual(missing.returncode, 0)
+
+
+class Calibration(unittest.TestCase):
+    def test_observations_and_buckets(self):
+        market = {"ticker": "KXT-1", "result": "yes", "volume": 500,
+                  "open_time": "1970-01-10T00:00:00Z", "close_time": "1970-01-20T00:00:00Z"}
+        close = kalshi.parse_time(market["close_time"])
+        # hourly candles; price rises from 0.30 to 0.80 over the last 10 days
+        candles = [candle(close - h * 3600, close=30 + (240 - h) * 50 // 240)
+                   for h in range(240, -1, -1)]
+        obs = kalshi_calibration.observe_market(market, candles)
+        # 720h horizon predates open_time -> dropped; the other four remain
+        self.assertEqual([o["hours_to_expiry"] for o in obs], [168, 24, 6, 1])
+        self.assertEqual([o["band"] for o in obs], ["1–7d", "<1d", "<1d", "<1d"])
+        self.assertTrue(all(o["yes"] == 1 for o in obs))
+        self.assertLess(obs[0]["price"], obs[-1]["price"])
+        self.assertEqual(kalshi_calibration.observe_market(dict(market, result=""), candles), [])
+
+        # a bucket with 3 yes of 4 at mean price 0.5 has error +0.25
+        rows = [{"series": "S", "band": "<1d", "price": 0.5, "yes": y} for y in (1, 1, 1, 0)]
+        table = kalshi_calibration.calibration_table(rows)
+        b = [r for r in table if r["series"] == "S" and r["band"] == "<1d" and r["n"] > 0]
+        self.assertEqual(len(b), 1)
+        self.assertAlmostEqual(b[0]["error"], 0.25)
+        self.assertTrue(b[0]["ci_low"] < 0.75 < b[0]["ci_high"])
+        pooled = [r for r in table if r["series"] == "ALL" and r["band"] == "ALL" and r["n"] > 0]
+        self.assertEqual(pooled[0]["n"], 4)
+        dist = kalshi_calibration.bias_distribution(table)
+        self.assertAlmostEqual(dist[0]["mean_error"], 0.25)
+        self.assertEqual(dist[0]["sd_error"], 0.0)
+
+    def test_wilson_interval(self):
+        lo, hi = kalshi_calibration.wilson(50, 100)
+        self.assertAlmostEqual(lo, 0.404, places=2)
+        self.assertAlmostEqual(hi, 0.596, places=2)
+        self.assertTrue(all(math.isnan(v) for v in kalshi_calibration.wilson(0, 0)))
+
+
+@unittest.skipUnless(BINARY.exists(), "build the simulator first (cmake --build build)")
+class FrictionFlagsThroughBinary(unittest.TestCase):
+    def run_binary(self, out: Path, name: str, *args):
+        result = subprocess.run([str(BINARY), "--seed", "5", "--steps", "1500",
+                                 "--informed-fraction", "0.3", "--log-detail", "0",
+                                 "--out-prefix", str(out / name), *args],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with (out / f"{name}_summary.csv").open() as fh:
+            return next(csv.DictReader(fh))
+
+    def test_fees_queue_latency_and_gm_change_only_what_they_should(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            base = self.run_binary(out, "base")
+            fee = self.run_binary(out, "fee", "--fee-rate", "0.07")
+            # same fills, same cash; fees are the only difference
+            self.assertEqual(fee["fill_count"], base["fill_count"])
+            self.assertEqual(fee["terminal_cash"], base["terminal_cash"])
+            self.assertGreater(float(fee["fees_paid"]), 0.0)
+            self.assertAlmostEqual(float(base["terminal_pnl"]) - float(fee["terminal_pnl"]),
+                                   float(fee["fees_paid"]), places=9)
+            self.assertEqual(float(base["fees_paid"]), 0.0)
+
+            queued = self.run_binary(out, "queued", "--queue-ahead", "1.0", "--informed-size", "3")
+            self.assertGreater(int(queued["absorbed_count"]), 0)
+            self.assertLess(int(queued["fill_count"]), int(base["fill_count"]))
+            informed_share = lambda r: int(r["informed_fill_count"]) / int(r["fill_count"])
+            self.assertGreater(informed_share(queued), informed_share(base))  # adverse fill
+
+            slow = self.run_binary(out, "slow", "--quote-latency", "10")
+            self.assertEqual(slow["quote_latency"], "10")
+            self.assertNotEqual(slow["terminal_pnl"], base["terminal_pnl"])
+            # (direction is a statistical statement; python/latency_sniping.py measures it)
+
+            gm = self.run_binary(out, "gm", "--mm-strategy", "gm")
+            self.assertEqual(gm["mm_strategy"], "gm")
+            self.assertGreater(int(gm["fill_count"]), 0)
+
+            bad = subprocess.run([str(BINARY), "--queue-ahead", "-1", "--out-prefix", str(out / "x")],
+                                 capture_output=True, text=True)
+            self.assertNotEqual(bad.returncode, 0)
 
 
 class _FakeKalshi(BaseHTTPRequestHandler):

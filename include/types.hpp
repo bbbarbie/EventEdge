@@ -36,8 +36,19 @@ enum class ProbProcess {
 enum class MMStrategy {
     FIXED_SPREAD,
     INVENTORY_AWARE,
-    ADAPTIVE_SPREAD
+    ADAPTIVE_SPREAD,
+    // Glosten-Milgrom (1985) Bayesian quoter: keeps a posterior over the
+    // latent probability, sets bid/ask at the regret-free prices
+    // E[p | sell] / E[p | buy] under the trader model, and updates on the
+    // observed flow (a no-trade step is informative too).
+    GLOSTEN_MILGROM
 };
+
+// Trader-population constants shared by the agents and by the GM quoter,
+// which must assume the same population to be the theory-optimal benchmark.
+constexpr double kValueTraderProbability = 0.20;
+constexpr double kNoiseTradeProbability = 0.30;
+constexpr double kMinEdge = 0.02;
 
 struct Order {
     std::size_t id = 0;
@@ -93,4 +104,31 @@ struct SimConfig {
     std::uint32_t random_seed = 42;
     MMStrategy mm_strategy = MMStrategy::FIXED_SPREAD;
     ProbProcess prob_process = ProbProcess::CLAMPED_ADDITIVE;
+
+    // Exchange fee per contract, Kalshi-shaped: fee_rate * p * (1 - p) at the
+    // fill price, rounded up to the next cent per fill when fee_round_cents.
+    // Kalshi's published taker rate is 0.07 and its maker rate 0.0175 (on
+    // the series that charge makers at all); 0 keeps the frictionless model.
+    double fee_rate = 0.0;
+    bool fee_round_cents = true;
+
+    // Fill model. queue_ahead is the mean number of contracts from other
+    // liquidity providers ahead of the MM at its price level (Poisson each
+    // step); an order fills the MM only with the size left after the queue.
+    // Informed traders send informed_size contracts, so with a queue they
+    // reach the MM more often than unit-size noise flow does.
+    double queue_ahead = 0.0;
+    int informed_size = 1;
+
+    // Quote latency in steps: the MM quotes off the public signal it
+    // observed quote_latency steps ago.
+    int quote_latency = 0;
+
+    // Glosten-Milgrom quoter's model of the world (defaults match the
+    // additive process); gm_informed < 0 means "assume the true fraction".
+    double gm_vol = 0.01;
+    double gm_jump_prob = 0.02;
+    double gm_jump_vol = 0.05;
+    double gm_informed = -1.0;
+    double gm_markup = 0.0;  // extra half-spread on top of the regret-free quotes
 };

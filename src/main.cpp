@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <deque>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -99,7 +100,12 @@ std::optional<std::vector<double>> read_prob_path(const std::string& file) {
 // Usage: eventedge [--seed N] [--steps N] [--out-prefix PATH]
 //                  [--bias X] [--informed-fraction X] [--spread X]
 //                  [--noise-pub X] [--noise-priv X] [--log-detail 0|1]
-//                  [--prob-path FILE] [--outcome yes|no|draw]
+//                  [--prob-path FILE] [--outcome yes|no|draw] [--p0 X]
+//                  [--fee-rate X] [--fee-round-cents 0|1] [--queue-ahead X]
+//                  [--informed-size N] [--quote-latency N]
+//                  [--mm-strategy fixed|inventory|gm] [--gm-vol X]
+//                  [--gm-jump-prob X] [--gm-jump-vol X] [--gm-informed X]
+//                  [--gm-markup X]
 //
 // --prob-path replays a real probability path (python/kalshi.py) as the
 // latent truth; --steps then defaults to the path length. --outcome forces
@@ -126,6 +132,9 @@ int main(int argc, char** argv) {
             steps_given = true;
         } else if (flag == "--out-prefix") {
             out_prefix = value;
+        } else if (flag == "--p0") {
+            config.true_prob_init = std::stod(value);
+            config.true_probability = config.true_prob_init;
         } else if (flag == "--bias") {
             config.calibration_bias = std::stod(value);
         } else if (flag == "--informed-fraction") {
@@ -143,6 +152,8 @@ int main(int argc, char** argv) {
                 config.mm_strategy = MMStrategy::FIXED_SPREAD;
             } else if (value == "inventory") {
                 config.mm_strategy = MMStrategy::INVENTORY_AWARE;
+            } else if (value == "gm") {
+                config.mm_strategy = MMStrategy::GLOSTEN_MILGROM;
             } else {
                 std::cerr << "Unknown --mm-strategy: " << value << '\n';
                 return 1;
@@ -158,6 +169,26 @@ int main(int argc, char** argv) {
                 std::cerr << "Unknown --prob-process: " << value << '\n';
                 return 1;
             }
+        } else if (flag == "--fee-rate") {
+            config.fee_rate = std::stod(value);
+        } else if (flag == "--fee-round-cents") {
+            config.fee_round_cents = std::stoi(value) != 0;
+        } else if (flag == "--queue-ahead") {
+            config.queue_ahead = std::stod(value);
+        } else if (flag == "--informed-size") {
+            config.informed_size = std::stoi(value);
+        } else if (flag == "--quote-latency") {
+            config.quote_latency = std::stoi(value);
+        } else if (flag == "--gm-vol") {
+            config.gm_vol = std::stod(value);
+        } else if (flag == "--gm-jump-prob") {
+            config.gm_jump_prob = std::stod(value);
+        } else if (flag == "--gm-jump-vol") {
+            config.gm_jump_vol = std::stod(value);
+        } else if (flag == "--gm-informed") {
+            config.gm_informed = std::stod(value);
+        } else if (flag == "--gm-markup") {
+            config.gm_markup = std::stod(value);
         } else if (flag == "--prob-path") {
             prob_path_file = value;
         } else if (flag == "--outcome") {
@@ -197,10 +228,18 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    if (config.true_prob_init <= 0.0 || config.true_prob_init >= 1.0) {
+        std::cerr << "--p0 must be strictly inside (0, 1)\n";
+        return 1;
+    }
     if (config.num_steps <= 0 || config.base_spread < 0.0 ||
         config.informed_fraction < 0.0 || config.informed_fraction > 1.0 ||
         config.signal_noise_pub < 0.0 || config.signal_noise_priv < 0.0 ||
-        config.inventory_aversion < 0.0) {
+        config.inventory_aversion < 0.0 || config.fee_rate < 0.0 ||
+        config.queue_ahead < 0.0 || config.informed_size < 1 ||
+        config.quote_latency < 0 || config.gm_vol <= 0.0 ||
+        config.gm_jump_prob < 0.0 || config.gm_jump_prob > 1.0 ||
+        config.gm_markup < 0.0) {
         std::cerr << "Invalid configuration values.\n";
         return 1;
     }
@@ -219,7 +258,13 @@ int main(int argc, char** argv) {
     TraderAgents trader_agents(trader_config);
     MarketMaker market_maker(config);
     OrderBook order_book;
+    if (config.queue_ahead > 0.0) {
+        // Its own stream, so enabling the queue never perturbs the others.
+        order_book.configure_queue(config.queue_ahead, config.random_seed * 7u + 5u);
+    }
     std::mt19937 settlement_rng(config.random_seed * 3u + 3u);
+    // Signals the MM has seen; with latency it quotes off an older one.
+    std::deque<double> mm_signal_history;
 
     std::ofstream summary_out(out_prefix + "_summary.csv");
     if (!summary_out) {
@@ -257,9 +302,14 @@ int main(int argc, char** argv) {
         prob_process.step();
         const double p_true = prob_process.true_prob();
 
-        // 2. MM observes its own public signal and posts a quote
+        // 2. MM observes its own public signal and posts a quote (off the
+        //    signal from quote_latency steps ago when it is slow)
         const double mm_signal = prob_process.public_signal();
-        const Quote quote = market_maker.compute_quote(mm_signal, t);
+        mm_signal_history.push_back(mm_signal);
+        if (static_cast<int>(mm_signal_history.size()) > config.quote_latency + 1) {
+            mm_signal_history.pop_front();
+        }
+        const Quote quote = market_maker.compute_quote(mm_signal_history.front(), t);
         order_book.update_quotes(quote);
 
         // 3. arriving trader observes its own (independent) signal
@@ -268,8 +318,11 @@ int main(int argc, char** argv) {
         const auto order = trader_agents.generate_order(
             t, trader_public_signal, trader_private_signal, quote);
 
-        // 4. match and process fill
+        // 4. match and process fill; the MM sees the order on the tape
+        //    whether or not the queue ahead absorbed it
+        std::optional<Side> observed_side;
         if (order.has_value()) {
+            observed_side = order->side;
             const auto fill = order_book.match_order(*order);
             if (fill.has_value()) {
                 market_maker.process_fill(*fill, p_true);
@@ -296,6 +349,8 @@ int main(int argc, char** argv) {
             }
         }
 
+        market_maker.observe_flow(observed_side);
+
         if (log_detail) {
             steps_out << t << ',' << p_true << ','
                       << market_maker.estimated_prob() << ','
@@ -311,6 +366,13 @@ int main(int argc, char** argv) {
     const int drawn_outcome = outcome_dist(settlement_rng) ? 1 : 0;
     const int event_outcome = forced_outcome.value_or(drawn_outcome);
     const char* outcome_source = forced_outcome ? "forced" : "draw";
+    // Marked P&L: inventory valued at the terminal latent probability. Since
+    // Y ~ Bernoulli(p_T) independently of everything else, this is exactly
+    // E[terminal_pnl | path, fills]: an unbiased estimator of expected P&L
+    // without the one Bernoulli draw per run that dominates the variance.
+    const double marked_pnl = market_maker.cash()
+        + market_maker.inventory() * terminal_prob
+        - market_maker.fees_paid();
     const double terminal_pnl = market_maker.cash()
         + market_maker.inventory() * static_cast<double>(event_outcome)
         - market_maker.fees_paid();
@@ -320,14 +382,18 @@ int main(int argc, char** argv) {
         : config.prob_process == ProbProcess::REPLAY            ? "replay"
                                                                 : "additive";
     const char* strategy_name =
-        config.mm_strategy == MMStrategy::INVENTORY_AWARE ? "inventory" : "fixed";
+        config.mm_strategy == MMStrategy::INVENTORY_AWARE  ? "inventory"
+        : config.mm_strategy == MMStrategy::GLOSTEN_MILGROM ? "gm"
+                                                            : "fixed";
     summary_out << "seed,num_steps,calibration_bias,informed_fraction,"
                    "base_spread,signal_noise_pub,signal_noise_priv,"
                    "mm_strategy,inventory_aversion,prob_process,"
                    "terminal_probability,event_outcome,fill_count,"
                    "informed_fill_count,value_fill_count,noise_fill_count,"
                    "terminal_cash,terminal_inventory,terminal_pnl,"
-                   "outcome_source,prob_path\n";
+                   "outcome_source,prob_path,true_prob_init,"
+                   "fees_paid,fee_rate,queue_ahead,absorbed_count,"
+                   "informed_size,quote_latency,terminal_pnl_marked\n";
     summary_out << config.random_seed << ',' << config.num_steps << ','
                 << config.calibration_bias << ',' << config.informed_fraction << ','
                 << config.base_spread << ',' << config.signal_noise_pub << ','
@@ -340,7 +406,12 @@ int main(int argc, char** argv) {
                 << noise_fill_count << ','
                 << market_maker.cash() << ','
                 << market_maker.inventory() << ',' << terminal_pnl << ','
-                << outcome_source << ',' << prob_path_file << '\n';
+                << outcome_source << ',' << prob_path_file << ','
+                << config.true_prob_init << ','
+                << market_maker.fees_paid() << ',' << config.fee_rate << ','
+                << config.queue_ahead << ',' << order_book.absorbed_count() << ','
+                << config.informed_size << ',' << config.quote_latency << ','
+                << marked_pnl << '\n';
 
     std::cout << "seed=" << config.random_seed
               << " steps=" << config.num_steps

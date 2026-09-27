@@ -1,6 +1,6 @@
 build/
 data/
-results/bias_sweep_runs.csv
+results/bias_sweep_runs*.csv
 results/inventory_aware_runs.csv
 results/markouts_per_fill.csv
 results/kalshi_replay_runs.csv
@@ -10,3 +10,5 @@ results/kalshi_path_stats.csv
 __pycache__/
 *.pyc
 /eventedge
+results/gm_benchmark_*.csv
+results/latency_sniping_*.csv

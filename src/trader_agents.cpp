@@ -1,21 +1,19 @@
 #include "trader_agents.hpp"
 
+#include <algorithm>
 #include <optional>
 #include <random>
 
 namespace {
 
-constexpr double kValueTraderProbability = 0.20;
-constexpr double kNoiseTradeProbability = 0.30;
-constexpr double kMinEdge = 0.02;
-
-Order make_market_order(int id, int timestep, TraderType trader_type, Side side) {
+Order make_market_order(int id, int timestep, TraderType trader_type, Side side,
+                        int quantity = 1) {
     Order order;
     order.id = id;
     order.trader_type = trader_type;
     order.order_type = OrderType::MARKET;
     order.side = side;
-    order.quantity = 1;
+    order.quantity = quantity;
     order.timestamp = timestep;
     return order;
 }
@@ -79,12 +77,15 @@ std::optional<Order> TraderAgents::informed_trader_order(
     double private_signal,
     const Quote& quote
 ) {
+    const int size = std::max(config_.informed_size, 1);
     if (private_signal - quote.ask > kMinEdge) {
-        return make_market_order(++order_id_counter_, timestep, TraderType::INFORMED, Side::BUY);
+        return make_market_order(++order_id_counter_, timestep, TraderType::INFORMED,
+                                 Side::BUY, size);
     }
 
     if (quote.bid - private_signal > kMinEdge) {
-        return make_market_order(++order_id_counter_, timestep, TraderType::INFORMED, Side::SELL);
+        return make_market_order(++order_id_counter_, timestep, TraderType::INFORMED,
+                                 Side::SELL, size);
     }
 
     return std::nullopt;

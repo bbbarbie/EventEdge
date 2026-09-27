@@ -16,7 +16,9 @@ aggregates the per-run summary CSVs.
 
 from __future__ import annotations
 
+import argparse
 import itertools
+import os
 import subprocess
 import sys
 from concurrent.futures import ProcessPoolExecutor
@@ -30,9 +32,23 @@ import numpy as np
 import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-BINARY = REPO_ROOT / "eventedge"
+BINARY = Path(os.environ.get("EVENTEDGE_BINARY", REPO_ROOT / "eventedge"))
 DATA_DIR = REPO_ROOT / "data" / "bias_sweep"
 RESULTS_DIR = REPO_ROOT / "results"
+
+# Latent process and starting probability for the sweep. The originals used
+# the clamped additive walk from p0 = 0.6; `--prob-process martingale --p0
+# 0.5` reruns the headline result on the drift-free process from the
+# symmetric start (see asymmetry_experiment.py for why that matters).
+PROB_PROCESS = "additive"
+P0 = 0.6
+SUFFIX = ""
+# Which P&L to average. "settled" is the realised cash + inventory * Y;
+# "marked" values inventory at the terminal latent probability, which is
+# E[settled | path] exactly and removes the one Bernoulli draw per run that
+# otherwise dominates the variance (and is shared across the grid, since
+# every cell reuses the same seeds).
+PNL_COLUMN = "terminal_pnl"
 
 BIAS_GRID = np.round(np.arange(-0.10, 0.1001, 0.02), 3)   # 11 values
 INFORMED_GRID = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]            # 6 values
@@ -43,7 +59,9 @@ MAX_WORKERS = 8
 
 def run_one(args: tuple[float, float, int]) -> Path:
     bias, informed, seed = args
-    prefix = DATA_DIR / f"b{bias:+.2f}_i{informed:.1f}_s{seed}"
+    prefix = DATA_DIR / f"{PROB_PROCESS}_p{P0:.1f}_b{bias:+.2f}_i{informed:.1f}_s{seed}"
+    if PROB_PROCESS == "additive" and P0 == 0.6:
+        prefix = DATA_DIR / f"b{bias:+.2f}_i{informed:.1f}_s{seed}"  # original naming
     summary_path = Path(f"{prefix}_summary.csv")
     if not summary_path.exists():  # cheap resume support
         subprocess.run(
@@ -52,6 +70,8 @@ def run_one(args: tuple[float, float, int]) -> Path:
              "--steps", str(NUM_STEPS),
              "--bias", f"{bias:.4f}",
              "--informed-fraction", f"{informed:.4f}",
+             "--prob-process", PROB_PROCESS,
+             "--p0", f"{P0:.4f}",
              "--log-detail", "0",
              "--out-prefix", str(prefix)],
             check=True, capture_output=True,
@@ -62,6 +82,7 @@ def run_one(args: tuple[float, float, int]) -> Path:
 def run_sweep() -> pd.DataFrame:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     grid = list(itertools.product(BIAS_GRID, INFORMED_GRID, range(NUM_SEEDS)))
+    print(f"P&L column: {PNL_COLUMN}")
     print(f"Running {len(grid)} simulations "
           f"({len(BIAS_GRID)} biases x {len(INFORMED_GRID)} informed fractions "
           f"x {NUM_SEEDS} seeds, {NUM_STEPS} steps each)...")
@@ -77,7 +98,7 @@ def plot_pnl_vs_bias(runs: pd.DataFrame, out_path: Path) -> None:
 
     for idx, informed in enumerate(INFORMED_GRID):
         sub = runs[np.isclose(runs["informed_fraction"], informed)]
-        stats = sub.groupby("calibration_bias")["terminal_pnl"].agg(["mean", "sem"])
+        stats = sub.groupby("calibration_bias")[PNL_COLUMN].agg(["mean", "sem"])
         color = cmap(idx / max(len(INFORMED_GRID) - 1, 1))
         ax.plot(stats.index, stats["mean"], marker="o", color=color,
                 label=f"informed = {informed:.0%}")
@@ -89,8 +110,10 @@ def plot_pnl_vs_bias(runs: pd.DataFrame, out_path: Path) -> None:
     ax.axhline(0.0, color="grey", linewidth=1, linestyle="--")
     ax.axvline(0.0, color="grey", linewidth=1, linestyle=":")
     ax.set_xlabel("Calibration bias (added to MM probability estimate)")
-    ax.set_ylabel("Mean terminal P&L (contracts x $1)")
+    ax.set_ylabel("Mean terminal P&L (contracts x $1)"
+                  + (", inventory marked at p_T" if PNL_COLUMN.endswith("marked") else ""))
     ax.set_title("Market-maker terminal P&L vs calibration bias\n"
+                 f"{PROB_PROCESS} process from p0 = {P0:.1f}, "
                  f"{NUM_SEEDS} seeds per point, {NUM_STEPS} steps, 95% CI")
     ax.legend(title="Informed fraction")
     ax.grid(alpha=0.3)
@@ -101,7 +124,7 @@ def plot_pnl_vs_bias(runs: pd.DataFrame, out_path: Path) -> None:
 
 def plot_heatmap(runs: pd.DataFrame, out_path: Path) -> None:
     pivot = (runs.groupby(["informed_fraction", "calibration_bias"])
-             ["terminal_pnl"].mean().unstack("calibration_bias"))
+             [PNL_COLUMN].mean().unstack("calibration_bias"))
 
     fig, ax = plt.subplots(figsize=(9, 5))
     vmax = np.abs(pivot.to_numpy()).max()
@@ -115,6 +138,7 @@ def plot_heatmap(runs: pd.DataFrame, out_path: Path) -> None:
     ax.set_xlabel("Calibration bias")
     ax.set_ylabel("Informed fraction")
     ax.set_title("Mean terminal P&L: calibration bias x informed fraction\n"
+                 f"{PROB_PROCESS} process from p0 = {P0:.1f}, "
                  f"{NUM_SEEDS} seeds per cell, {NUM_STEPS} steps")
 
     for row in range(pivot.shape[0]):
@@ -123,28 +147,45 @@ def plot_heatmap(runs: pd.DataFrame, out_path: Path) -> None:
             ax.text(col, row, f"{value:.0f}", ha="center", va="center",
                     fontsize=7, color="black")
 
-    fig.colorbar(im, ax=ax, label="Mean terminal P&L")
+    fig.colorbar(im, ax=ax, label="Mean terminal P&L"
+                 + (" (marked at p_T)" if PNL_COLUMN.endswith("marked") else ""))
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     print(f"Saved {out_path}")
 
 
 def main() -> int:
+    global PROB_PROCESS, P0, SUFFIX, NUM_SEEDS, PNL_COLUMN
+    parser = argparse.ArgumentParser(description="calibration bias x informed sweep")
+    parser.add_argument("--prob-process", choices=["additive", "martingale"], default="additive")
+    parser.add_argument("--p0", type=float, default=0.6)
+    parser.add_argument("--seeds", type=int, default=NUM_SEEDS)
+    parser.add_argument("--pnl", choices=["settled", "marked"], default="settled")
+    args = parser.parse_args()
+    PROB_PROCESS, P0, NUM_SEEDS = args.prob_process, args.p0, args.seeds
+    PNL_COLUMN = "terminal_pnl_marked" if args.pnl == "marked" else "terminal_pnl"
+    if not (PROB_PROCESS == "additive" and P0 == 0.6 and args.pnl == "settled"):
+        SUFFIX = f"_{PROB_PROCESS}_p{P0:.1f}_{args.pnl}".replace(".", "")
+
     if not BINARY.exists():
         print(f"Binary not found: {BINARY}. Build the C++ simulator first.")
         return 1
 
     runs = run_sweep()
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    runs.to_csv(RESULTS_DIR / "bias_sweep_runs.csv", index=False)
+    runs.to_csv(RESULTS_DIR / f"bias_sweep_runs{SUFFIX}.csv", index=False)
 
     table = (runs.groupby(["informed_fraction", "calibration_bias"])
-             ["terminal_pnl"].mean().unstack("calibration_bias"))
-    print("\nMean terminal P&L (rows: informed fraction, cols: bias):")
+             [PNL_COLUMN].mean().unstack("calibration_bias"))
+    print(f"\nMean {PNL_COLUMN} (rows: informed fraction, cols: bias):")
     print(table.round(1).to_string())
+    sem = (runs.groupby(["informed_fraction", "calibration_bias"])
+           [PNL_COLUMN].sem().unstack("calibration_bias"))
+    print("\n95% half-width:")
+    print((1.96 * sem).round(1).to_string())
 
-    plot_pnl_vs_bias(runs, RESULTS_DIR / "pnl_vs_calibration_bias.png")
-    plot_heatmap(runs, RESULTS_DIR / "heatmap_bias_x_informed.png")
+    plot_pnl_vs_bias(runs, RESULTS_DIR / f"pnl_vs_calibration_bias{SUFFIX}.png")
+    plot_heatmap(runs, RESULTS_DIR / f"heatmap_bias_x_informed{SUFFIX}.png")
     return 0
 
 
