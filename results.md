@@ -116,3 +116,118 @@ process difference to ≈ 5% and leaves the marked difference (an order of magni
 smaller) unresolved. The adverse-selection component has a per-run SD of ~0.002 per
 contract, so every contrast on it is resolved to well under 5% at these N.
 
+## 2. Task A — martingale validation and the cost of clipping
+
+Script: `experiments/task_a_latent.py` (harness `build/latent_paths`, built from
+`experiments/latent_paths.cpp` against `EventProbabilityProcess`; the harness refuses
+to run unless its σ-scalable mirror reproduces the class bit-for-bit over 20 seeds ×
+T steps). N = 200,000 paths per (process, p₀, config), seeds 1…N, stream `seed·3+1`
+as in the simulator; settlement is one Bernoulli(p_T) draw per path from stream
+`seed·3+3`. Horizon T = 2000 steps, σ at repo defaults, no trading. Figure:
+`results/taskA_bias_vs_p0.png`; tables: `results/taskA_bias_table.csv`,
+`results/taskA_conditional.csv`.
+
+![Task A](results/taskA_bias_vs_p0.png)
+
+#### A1. Bias at the default σ and horizon (pp)
+
+N = 200,000 paths per cell, T = 2000 steps, σ = repo default (additive: 0.01/step + 2%×0.05 jumps, clamp [0.01, 0.99]; martingale: 0.042·p(1−p)/step + 2%×0.21·p(1−p) jumps, clamp [1e-6, 1−1e-6]).
+
+| p₀ | clipped: E[p_T]−p₀ | clipped: settle freq−p₀ | p(1−p): E[p_T]−p₀ | p(1−p): settle freq−p₀ |
+|---|---|---|---|---|
+| 0.05 | +35.81 ± 0.06 | +35.72 ± 0.05 | -0.01 ± 0.03 | +0.03 ± 0.05 |
+| 0.10 | +31.15 ± 0.06 | +31.07 ± 0.07 | -0.01 ± 0.05 | +0.01 ± 0.07 |
+| 0.20 | +22.48 ± 0.06 | +22.35 ± 0.09 | -0.02 ± 0.07 | -0.03 ± 0.09 |
+| 0.35 | +10.80 ± 0.06 | +10.69 ± 0.11 | -0.05 ± 0.08 | -0.02 ± 0.11 |
+| 0.50 | +0.04 ± 0.06 | -0.05 ± 0.11 | -0.05 ± 0.09 | -0.03 ± 0.11 |
+| 0.65 | -10.72 ± 0.06 | -10.79 ± 0.11 | -0.03 ± 0.08 | -0.09 ± 0.11 |
+| 0.80 | -22.42 ± 0.06 | -22.38 ± 0.09 | -0.01 ± 0.07 | -0.05 ± 0.09 |
+| 0.90 | -31.10 ± 0.06 | -31.06 ± 0.07 | -0.03 ± 0.05 | -0.02 ± 0.07 |
+| 0.95 | -35.76 ± 0.06 | -35.75 ± 0.05 | -0.04 ± 0.03 | -0.02 ± 0.05 |
+
+#### A2. Max |bias| over the p₀ grid (pp)
+
+| process | max |E[p_T]−p₀| | at p₀ | max |settle−p₀| | at p₀ |
+|---|---|---|---|---|
+| additive | 35.81 ± 0.06 | 0.05 | 35.75 ± 0.05 | 0.95 |
+| martingale | 0.05 ± 0.09 | 0.50 | 0.09 ± 0.11 | 0.65 |
+
+#### A3. Conditional martingale check, E[p_T | p_{T/2}] − p_{T/2} (pp), pooled over the p₀ grid
+
+| p_{T/2} bin | n (clipped) | clipped | n (p(1−p)) | p(1−p) |
+|---|---|---|---|---|
+| [0.0, 0.05) | 92,615 | +28.00 ± 0.07 | 404,232 | +0.01 ± 0.01 |
+| [0.05, 0.1) | 92,118 | +23.28 ± 0.07 | 129,153 | +0.01 ± 0.04 |
+| [0.1, 0.15) | 91,781 | +19.38 ± 0.08 | 80,392 | +0.03 ± 0.06 |
+| [0.15, 0.2) | 90,908 | +15.88 ± 0.08 | 59,487 | -0.02 ± 0.09 |
+| [0.2, 0.25) | 90,327 | +12.63 ± 0.08 | 48,132 | -0.03 ± 0.12 |
+| [0.25, 0.3) | 89,486 | +9.96 ± 0.09 | 41,676 | +0.15 ± 0.14 |
+| [0.3, 0.35) | 89,129 | +7.58 ± 0.09 | 37,627 | +0.32 ± 0.15 |
+| [0.35, 0.4) | 88,748 | +4.95 ± 0.09 | 34,787 | -0.19 ± 0.17 |
+| [0.4, 0.45) | 88,738 | +3.15 ± 0.09 | 33,133 | -0.15 ± 0.18 |
+| [0.45, 0.5) | 87,733 | +1.09 ± 0.09 | 32,204 | +0.04 ± 0.18 |
+| [0.5, 0.55) | 87,583 | -0.89 ± 0.09 | 32,233 | +0.36 ± 0.18 |
+| [0.55, 0.6) | 88,102 | -2.83 ± 0.09 | 33,054 | +0.04 ± 0.18 |
+| [0.6, 0.65) | 88,739 | -5.10 ± 0.09 | 34,898 | -0.02 ± 0.17 |
+| [0.65, 0.7) | 89,289 | -7.26 ± 0.09 | 37,681 | +0.04 ± 0.15 |
+| [0.7, 0.75) | 89,914 | -9.49 ± 0.09 | 41,496 | +0.07 ± 0.14 |
+| [0.75, 0.8) | 89,672 | -12.52 ± 0.08 | 48,299 | +0.04 ± 0.12 |
+| [0.8, 0.85) | 90,536 | -15.96 ± 0.08 | 59,382 | -0.02 ± 0.09 |
+| [0.85, 0.9) | 90,941 | -19.38 ± 0.08 | 80,416 | +0.08 ± 0.06 |
+| [0.9, 0.95) | 90,340 | -23.43 ± 0.08 | 129,212 | -0.03 ± 0.04 |
+| [0.95, 1.0) | 93,301 | -27.91 ± 0.07 | 402,506 | -0.00 ± 0.01 |
+
+#### A4. Boundary accounting (default config)
+
+| p₀ | clipped: paths clipped ≥1 | clipped: mean clips/path | p(1−p): Euler steps outside [0,1] | p(1−p): paths with any |
+|---|---|---|---|---|
+| 0.05 | 95.4% | 48.3 | 8 | 0.004% |
+| 0.10 | 90.9% | 43.4 | 5 | 0.003% |
+| 0.20 | 82.8% | 35.3 | 1 | 0.001% |
+| 0.35 | 73.9% | 27.6 | 2 | 0.001% |
+| 0.50 | 70.6% | 25.0 | 1 | 0.001% |
+| 0.65 | 73.9% | 27.6 | 1 | 0.001% |
+| 0.80 | 82.8% | 35.3 | 1 | 0.001% |
+| 0.90 | 91.0% | 43.4 | 4 | 0.002% |
+| 0.95 | 95.5% | 48.3 | 6 | 0.003% |
+
+#### A5. Sensitivity: max |E[p_T]−p₀| over the p₀ grid (pp)
+
+| config | σ·√T relative | clipped max |bias| (at p₀) | p(1−p) max |bias| (at p₀) |
+|---|---|---|---|
+| default | 1.00 | 35.81 ± 0.06 (0.05) | 0.05 ± 0.09 (0.50) |
+| sigma x0.5 | 0.50 | 17.60 ± 0.04 (0.95) | 0.02 ± 0.04 (0.80) |
+| sigma x2 | 2.00 | 44.93 ± 0.07 (0.05) | 0.11 ± 0.11 (0.65) |
+| T x0.5 | 0.71 | 25.87 ± 0.05 (0.95) | 0.08 ± 0.07 (0.35) |
+| T x2 | 1.41 | 42.99 ± 0.06 (0.05) | 0.09 ± 0.10 (0.50) |
+
+**Reading.**
+
+- **A1/A2 (headline).** The clipped process is biased by up to **35.8 ± 0.06 pp**
+  (p₀ = 0.05; −35.8 at 0.95), and the bias is nearly linear in (0.5 − p₀): the
+  reflecting clamp at [0.01, 0.99] pushes every path toward the interior, so
+  E[p_T] ≈ 0.5·(1 − e^{−κT}) + p₀·e^{−κT}-like relaxation toward 0.5. At the repo
+  default p₀ = 0.6 the bias is −7 pp (interpolating 0.5 → 0.65: −10.7). The p(1−p)
+  process has **max |bias| 0.05 ± 0.09 pp** on E[p_T] and 0.09 ± 0.11 pp on the
+  settlement frequency: zero within SE at every p₀. Settlement frequency and E[p_T]
+  agree to within their SEs for both processes, as they must under Bernoulli(p_T)
+  settlement.
+- **A3.** The clipped process fails the conditional check in *every* bin, not only
+  the boundary ones: +28.0 pp at p_{T/2} < 0.05, still +1.1 pp at [0.45, 0.5) and
+  −0.9 at [0.5, 0.55), sign-antisymmetric about 0.5. That is because over the
+  remaining 1000 steps (σ√T ≈ 0.32) most paths reach a clamp wherever they start.
+  The p(1−p) process is flat: 20 bins, all within 2.1 SE of zero (largest +0.36 ± 0.18
+  and +0.32 ± 0.15; with 20 bins one or two ~2 SE deviations are expected), and
+  exactly zero to 0.01 pp in the two boundary bins that hold 40% of the mass.
+- **A4.** 71–95% of clipped-process paths hit a clamp at least once, 25–48 times per
+  path on average. The p(1−p) process left [0, 1] in 1–8 Euler steps out of 4×10⁸
+  per cell (0.001–0.004% of paths, always in a jump step); it is then clamped to
+  [10⁻⁶, 1 − 10⁻⁶]. That clamp binds ~10⁻⁸ of steps and moves p by < 10⁻⁶ when it
+  does, so it cannot reintroduce measurable bias, and the A1/A3 numbers confirm
+  none is visible at 0.05 pp resolution.
+- **A5.** Clipping bias grows with σ·√T as predicted but saturates: relative
+  σ√T of 0.5 / 0.71 / 1 / 1.41 / 2 gives max |bias| 17.6 / 25.9 / 35.8 / 43.0 /
+  44.9 pp. The ceiling is 45 pp (E[p_T] → 0.5 from p₀ = 0.05 once every path has
+  forgotten its start), so the growth is concave, not linear. The p(1−p) process
+  stays ≤ 0.11 ± 0.11 pp in every configuration. Confirmed.
+

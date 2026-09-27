@@ -12,3 +12,5 @@ __pycache__/
 /eventedge
 results/gm_benchmark_*.csv
 results/latency_sniping_*.csv
+results/taskB_runs.csv
+results/taskA6_runs.csv

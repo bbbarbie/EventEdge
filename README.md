@@ -120,17 +120,17 @@ Prediction-market making is the textbook Glosten–Milgrom (1985) setting: a bin
 
 ![GM benchmark](results/gm_benchmark.png)
 
-Mean terminal P&L at zero calibration bias (30 seeds, settled P&L; the 100-seed marked rerun is in progress) and the realised spread each quoter posted:
+Martingale process from p0 = 0.5, inventory marked at p_T, 100 seeds per point. Mean terminal P&L at zero calibration bias, and the realised spread each quoter posted:
 
 | quoter | 10% informed | 30% | 50% | spread at 10 / 30 / 50% |
 |---|---|---|---|---|
-| fixed 0.04 | −2.7 | −8.5 | −16.2 | 0.039 |
-| inventory-aware k = 0.002 | −0.2 | −10.3 | −19.3 | 0.040 |
-| **Glosten–Milgrom** | **+0.5** | **+5.0** | **+6.7** | 0.012 / 0.020 / 0.028 |
-| GM told 10% informed | +0.5 | +2.7 | +5.2 | 0.012 |
-| GM with a no-jump process model | +0.4 | +4.4 | +6.0 | 0.010 / 0.017 / 0.024 |
+| fixed 0.04 | +0.2 ± 1.0 | −9.6 ± 1.5 | −17.9 ± 1.9 | 0.039 |
+| inventory-aware k = 0.002 | −0.3 | −8.9 | −17.5 | 0.040 |
+| **Glosten–Milgrom** | **+0.2** | **+0.7** | **+1.4** | 0.012 / 0.020 / 0.028 |
+| GM told 10% informed | +0.2 | −2.1 | −3.4 | 0.012 |
+| GM with a no-jump process model | −0.4 | +0.1 | +0.6 | 0.010 / 0.017 / 0.024 |
 
-Three things to read off. First, the GM quoter is profitable at every informed fraction where the fixed spread loses, and it does so with a spread one-half to one-third as wide, because its quotes move with the flow: a buy raises its posterior before the next informed buyer arrives, so the second informed trade finds less edge. Second, misspecifying the population costs money exactly where GM theory says it should: told there are 10% informed when there are 50%, it quotes a 1.2¢ spread against a 2.8¢ adverse-selection cost and gives back most of its edge, and at +0.10 bias it loses −130 against the well-specified −83. Third, the process model barely matters: dropping the jump term from the quoter's kernel changes P&L by under 1, because the public signal (σ = 0.05) re-anchors the posterior every step and the one-step diffusion (σ = 0.01) is small beside it — the jump risk is priced through the signal, not the prior. Calibration bias hurts GM about as much as the naive quoter (it enters through the signal, and a Bayesian trusts its signal), so the theory-optimal quoter fixes the spread problem, not the calibration problem.
+Three things to read off. First, the GM quoter breaks even (as the regret-free condition says it should) at every informed fraction where the fixed spread loses 10–18, and it does so with a spread one-half to one-third as wide, because its quotes move with the flow: a buy raises its posterior before the next informed buyer arrives, so the second informed trade finds less edge. Second, misspecifying the population costs money exactly where GM theory says it should: told there are 10% informed when there are 50%, it quotes a 1.2¢ spread against a 2.8¢ adverse-selection cost and turns break-even into −3.4, and at +0.10 bias it loses −129 against the well-specified −87. Third, the process model barely matters: dropping the jump term from the quoter's kernel changes P&L by under 1, because the public signal (σ = 0.05) re-anchors the posterior every step and the one-step diffusion (σ = 0.01) is small beside it — the jump risk is priced through the signal, not the prior. Calibration bias hurts GM about as much as the naive quoter (it enters through the signal, and a Bayesian trusts its signal): at ±0.10 bias GM loses −24 to −87 against the fixed quoter's −18 to −86. The theory-optimal quoter fixes the spread problem, not the calibration problem. The residual −0.10 vs +0.10 gap in this table (100 shared seeds, CI ≈ ±20) is the shared-path noise discussed in result 6, not a mechanism.
 
 ### 9. Stale quotes: the cost of latency is linear in the delay, and it is all in the jump windows
 
