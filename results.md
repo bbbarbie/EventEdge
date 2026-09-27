@@ -231,3 +231,102 @@ N = 200,000 paths per cell, T = 2000 steps, σ = repo default (additive: 0.01/st
   forgotten its start), so the growth is concave, not linear. The p(1−p) process
   stays ≤ 0.11 ± 0.11 pp in every configuration. Confirmed.
 
+## 3. Task A6 — P&L consequence of clipping for the default MM
+
+Script: `experiments/task_a6_pnl.py --seeds 10000`. Default MM: ε = 0, π = 0.10,
+spread 0.04, T = 2000, σ at defaults; the same 10,000 seeds on both processes (shared
+arrival and settlement streams; the latent path differs by construction). Full
+per-seed data in `results/taskA6_runs.csv` (gitignored), cell means in
+`results/taskA6_cells.csv`.
+
+#### A6. Default MM on both processes (ε = 0, π = 0.1, spread 0.04, T = 2000, N = 10000 seeds per cell, same seeds)
+
+P&L per contract traded. Difference = additive − martingale, paired by seed (shared arrival and settlement streams).
+
+| p₀ | quantity | clipped additive | p(1−p) martingale | difference (paired SE) |
+|---|---|---|---|---|
+| 0.2 | settled P&L / contract | +0.0010 ± 0.0002 | +0.0010 ± 0.0001 | +0.0000 ± 0.0002 |
+| 0.2 | marked P&L / contract | +0.0011 ± 0.0001 | +0.0010 ± 0.0001 | +0.0001 ± 0.0001 |
+| 0.2 | spread capture / contract | +0.0194 ± 0.0000 | +0.0182 ± 0.0000 | +0.0012 ± 0.0000 |
+| 0.2 | adverse selection / contract | -0.0195 ± 0.0000 | -0.0172 ± 0.0000 | -0.0024 ± 0.0000 |
+| 0.2 | settlement drift / contract | +0.0012 ± 0.0001 | -0.0001 ± 0.0001 | +0.0013 ± 0.0001 |
+| 0.2 | settlement draw / contract | -0.0001 ± 0.0002 | -0.0000 ± 0.0001 | -0.0001 ± 0.0002 |
+| 0.2 | contracts per run | +726.8609 ± 0.2415 | +690.0652 ± 0.5313 | +36.7957 ± 0.5000 |
+| 0.2 | terminal inventory | +2.3093 ± 0.2723 | +9.9540 ± 0.2816 | -7.6447 ± 0.2317 |
+| 0.2 | E[p_T] | +0.4233 ± 0.0028 | +0.1957 ± 0.0030 | +0.2276 ± 0.0037 |
+| 0.5 | settled P&L / contract | +0.0004 ± 0.0002 | +0.0001 ± 0.0001 | +0.0003 ± 0.0002 |
+| 0.5 | marked P&L / contract | +0.0005 ± 0.0001 | +0.0003 ± 0.0001 | +0.0003 ± 0.0001 |
+| 0.5 | spread capture / contract | +0.0196 ± 0.0000 | +0.0190 ± 0.0000 | +0.0006 ± 0.0000 |
+| 0.5 | adverse selection / contract | -0.0198 ± 0.0000 | -0.0187 ± 0.0000 | -0.0011 ± 0.0000 |
+| 0.5 | settlement drift / contract | +0.0008 ± 0.0001 | -0.0001 ± 0.0001 | +0.0008 ± 0.0001 |
+| 0.5 | settlement draw / contract | -0.0001 ± 0.0002 | -0.0001 ± 0.0001 | +0.0000 ± 0.0002 |
+| 0.5 | contracts per run | +730.6886 ± 0.2348 | +713.9946 ± 0.4076 | +16.6940 ± 0.3847 |
+| 0.5 | terminal inventory | -0.0334 ± 0.2731 | +0.3292 ± 0.2830 | -0.3626 ± 0.2312 |
+| 0.5 | E[p_T] | +0.4976 ± 0.0029 | +0.4943 ± 0.0040 | +0.0033 ± 0.0043 |
+| 0.6 | settled P&L / contract | +0.0005 ± 0.0002 | +0.0003 ± 0.0001 | +0.0002 ± 0.0002 |
+| 0.6 | marked P&L / contract | +0.0006 ± 0.0001 | +0.0003 ± 0.0001 | +0.0003 ± 0.0001 |
+| 0.6 | spread capture / contract | +0.0196 ± 0.0000 | +0.0190 ± 0.0000 | +0.0006 ± 0.0000 |
+| 0.6 | adverse selection / contract | -0.0198 ± 0.0000 | -0.0186 ± 0.0000 | -0.0012 ± 0.0000 |
+| 0.6 | settlement drift / contract | +0.0008 ± 0.0001 | -0.0001 ± 0.0001 | +0.0009 ± 0.0001 |
+| 0.6 | settlement draw / contract | -0.0001 ± 0.0002 | -0.0000 ± 0.0001 | -0.0001 ± 0.0002 |
+| 0.6 | contracts per run | +730.2326 ± 0.2365 | +712.0555 ± 0.4217 | +18.1771 ± 0.3968 |
+| 0.6 | terminal inventory | -0.7750 ± 0.2734 | -2.3653 ± 0.2830 | +1.5903 ± 0.2310 |
+| 0.6 | E[p_T] | +0.5264 ± 0.0029 | +0.5951 ± 0.0039 | -0.0687 ± 0.0042 |
+| 0.8 | settled P&L / contract | +0.0010 ± 0.0002 | +0.0009 ± 0.0001 | +0.0001 ± 0.0002 |
+| 0.8 | marked P&L / contract | +0.0012 ± 0.0001 | +0.0009 ± 0.0001 | +0.0002 ± 0.0001 |
+| 0.8 | spread capture / contract | +0.0194 ± 0.0000 | +0.0183 ± 0.0000 | +0.0012 ± 0.0000 |
+| 0.8 | adverse selection / contract | -0.0195 ± 0.0000 | -0.0172 ± 0.0000 | -0.0023 ± 0.0000 |
+| 0.8 | settlement drift / contract | +0.0013 ± 0.0001 | -0.0001 ± 0.0001 | +0.0014 ± 0.0001 |
+| 0.8 | settlement draw / contract | -0.0002 ± 0.0002 | -0.0001 ± 0.0001 | -0.0001 ± 0.0002 |
+| 0.8 | contracts per run | +726.7889 ± 0.2430 | +691.3279 ± 0.5263 | +35.4610 ± 0.4923 |
+| 0.8 | terminal inventory | -2.4191 ± 0.2725 | -9.2803 ± 0.2825 | +6.8612 ± 0.2317 |
+| 0.8 | E[p_T] | +0.5734 ± 0.0028 | +0.7966 ± 0.0031 | -0.2233 ± 0.0037 |
+
+**Reading.** For a *calibrated* MM the total cost of clipping is zero within SE:
+the paired difference in settled P&L per contract is +0.0000 ± 0.0002 (p₀ = 0.2),
++0.0003 ± 0.0002 (0.5), +0.0002 ± 0.0002 (0.6), +0.0001 ± 0.0002 (0.8) — bounded
+at 95% to |Δ| < 0.0007 per contract, i.e. < 4% of the spread capture per contract
+(≈ 0.019). The 5% rule is therefore not met for this contrast in the sense that the
+effect itself is indistinguishable from zero; what is resolved is the bound.
+
+The components are *not* the same, they offset. On the clipped process the MM earns
+more spread (+0.0006 to +0.0012 per contract: 17–37 more fills per run, because the
+constant-σ walk keeps moving near the bounds where the p(1−p) process goes quiet)
+and loses more to adverse selection (−0.0011 to −0.0024 per contract, same reason:
+informed traders have more to know), and it collects a positive settlement-drift term
+(+0.0008 to +0.0014 per contract, 8–14 SE from zero) that the martingale lacks
+(−0.0001 ± 0.0001). So the component that "absorbs" the process change at ε = 0 is
+adverse selection, and it is paid back by spread capture and drift. The drift term is
+positive rather than zero here because even at ε = 0 the MM's transient inventory is
+anti-correlated with recent moves (it is long after sells), and on the clipped process
+recent moves toward a bound are followed by reversion. Its expected size scales with
+the inventory the MM carries — which is ~0 at ε = 0 (terminal inventory −2 to +10)
+and ~800 at ε = ±0.10. That is why the clipping cost that is invisible here becomes the
+whole asymmetry story in Task B.
+
+E[p_T] confirms A1 inside the trading runs: from p₀ = 0.2 the clipped process ends at
+0.423 ± 0.003 and the martingale at 0.196 ± 0.003.
+
+## 5. Task C — replayed Kalshi paths vs synthetic (not run)
+
+Not run. Two blockers, both outside the ground rules to fix here:
+
+1. **No replayed markets are available.** This environment's network policy denies
+   `api.elections.kalshi.com` (CONNECT 403), so `python/kalshi.py fetch` cannot pull a
+   path and `data/kalshi/` is empty. The replay mode itself (`--prob-path`,
+   `--outcome`) is built and tested (`tests/test_kalshi.py`, round trip through the
+   binary), so Task C can be run on any machine with access:
+   `python3 python/kalshi.py fetch --ticker <T> --interval 1` for each market, then a
+   Task C script that pairs each `<T>_path.csv` with a synthetic martingale path whose
+   σ is set from `kalshi.py stats` (`martingale_vol`) and the same seeds.
+2. **Peek-ahead informed traders are a feature.** The informed trader as implemented
+   observes the current latent level with noise (definition (2)); trading "in the
+   direction of the next replayed move with probability π" would be a new information
+   mode in `src/trader_agents.cpp`. The task says not to add features, so the
+   definition is recorded here for when it is: on a replayed path, an informed arrival
+   at step t would buy if `p_{t+1} > p_t` and sell if `p_{t+1} < p_t` (no trade on a
+   flat step), with the same edge threshold against the quote, and the σ-matched
+   synthetic control would use the existing noisy-level informed trader, so the two
+   would differ in information structure as well as in path — that confound should
+   be split by also running the peek-ahead trader on the synthetic path.
+
