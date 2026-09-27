@@ -29,3 +29,7 @@ if(Python3_Interpreter_FOUND)
              COMMAND ${Python3_EXECUTABLE} -m unittest tests.test_kalshi
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()
+
+# Task A harness (experiments/): latent paths without trading.
+add_executable(latent_paths experiments/latent_paths.cpp)
+target_link_libraries(latent_paths PRIVATE eventedge_core)

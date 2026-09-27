@@ -22,7 +22,8 @@ Three comparisons:
      facing the jumpy additive process.
 
 P&L is reported with inventory marked at the terminal latent probability
-(E[settled P&L | path], see run_experiments.py), 100 seeds per point.
+(E[settled P&L | path], see run_experiments.py), 100 seeds per point, on the
+martingale process from p0 = 0.5 (flags --prob-process / --p0).
 
 Outputs:
   results/gm_benchmark.csv
@@ -49,6 +50,9 @@ import pandas as pd
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BINARY = Path(os.environ.get("EVENTEDGE_BINARY", REPO_ROOT / "eventedge"))
 DATA_DIR = REPO_ROOT / "data" / "gm_benchmark"
+# Latent process for the benchmark: martingale from p0 = 0.5 by default, so
+# no drift artifact favours the short side (see README results 4 and 6).
+PROCESS_FLAGS = ["--prob-process", "martingale", "--p0", "0.5"]
 RESULTS_DIR = REPO_ROOT / "results"
 
 BIAS_GRID = [-0.10, -0.05, 0.0, 0.05, 0.10]
@@ -73,7 +77,7 @@ COLORS = {
 
 def run_one(args: tuple[str, float, float, int, str | None]) -> Path:
     quoter, bias, informed, seed, prob_path = args
-    tag = "synthetic" if prob_path is None else Path(prob_path).stem
+    tag = ("synthetic_" + "_".join(PROCESS_FLAGS[1::2])) if prob_path is None else Path(prob_path).stem
     slug = quoter.replace(" ", "").replace(",", "").replace("%", "").replace("=", "").replace(".", "")
     prefix = DATA_DIR / f"{tag}_{slug}_b{bias:+.2f}_i{informed:.1f}_s{seed}"
     summary = Path(f"{prefix}_summary.csv")
@@ -81,7 +85,7 @@ def run_one(args: tuple[str, float, float, int, str | None]) -> Path:
         cmd = [str(BINARY), "--seed", str(seed), "--bias", f"{bias:.4f}",
                "--informed-fraction", f"{informed:.4f}", "--log-detail", "1",
                "--out-prefix", str(prefix)] + QUOTERS[quoter]
-        cmd += ["--prob-path", prob_path] if prob_path else ["--steps", str(NUM_STEPS)]
+        cmd += ["--prob-path", prob_path] if prob_path else ["--steps", str(NUM_STEPS)] + PROCESS_FLAGS
         subprocess.run(cmd, check=True, capture_output=True)
     return summary
 
@@ -95,7 +99,11 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--prob-path", help="benchmark on a real Kalshi path instead")
     parser.add_argument("--seeds", type=int, default=NUM_SEEDS)
+    parser.add_argument("--prob-process", choices=["additive", "martingale"], default="martingale")
+    parser.add_argument("--p0", type=float, default=0.5)
     args = parser.parse_args(argv)
+    global PROCESS_FLAGS
+    PROCESS_FLAGS = ["--prob-process", args.prob_process, "--p0", f"{args.p0:.4f}"]
     if not BINARY.exists():
         print(f"Binary not found: {BINARY}")
         return 1
@@ -145,7 +153,8 @@ def main(argv=None) -> int:
         ax.grid(alpha=0.3)
     axes[0].set_ylabel("Mean terminal P&L, inventory marked at p_T (95% CI)")
     axes[0].legend(fontsize=8)
-    fig.suptitle(f"Glosten–Milgrom vs naive quoting, {args.seeds} seeds per point"
+    fig.suptitle(f"Glosten–Milgrom vs naive quoting, {args.seeds} seeds per point, "
+                 f"{args.prob_process} process from p0 = {args.p0:.1f}"
                  + ("" if args.prob_path is None else f", path {Path(args.prob_path).stem}"),
                  y=1.02)
     fig.tight_layout()
