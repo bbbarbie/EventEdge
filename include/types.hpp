@@ -26,7 +26,11 @@ enum class ProbProcess {
     CLAMPED_ADDITIVE,
     // State-dependent volatility: dp = vol * p(1-p) * Z. A true martingale
     // that stays in (0, 1) naturally, so settlement risk is mean-zero.
-    LOGISTIC_MARTINGALE
+    LOGISTIC_MARTINGALE,
+    // Replay an externally supplied probability path (e.g. a Kalshi market's
+    // traded price series, see python/kalshi.py). No synthetic dynamics: the
+    // path is the latent truth, step t reads row t-1.
+    REPLAY
 };
 
 enum class MMStrategy {

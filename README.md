@@ -68,7 +68,7 @@ The skew is insurance: it costs ~2 P&L at zero bias (quoting off-estimate gives 
 
 ## Model
 
-**Latent probability.** A hidden true probability `p_true` evolves by one of two processes. Default (`--prob-process additive`): a Gaussian random walk (σ=0.01 per step) with occasional jumps (2% chance of a σ=0.05 shock), clamped to [0.01, 0.99] — simple, but the clamp induces drift near the bounds. Alternative (`--prob-process martingale`): `Δp = σ·p(1−p)·Z` with vol matched to the additive process at p=0.6 — a true martingale that stays in (0, 1) naturally (the safety clamp at 1e-6 binds only on rare boundary-hugging steps, where its P&L effect is ~1e-6). Clip counts are tracked in both cases. At the end of a run the event outcome is drawn `Y ~ Bernoulli(p_true(T))` and all open inventory settles at Y.
+**Latent probability.** A hidden true probability `p_true` evolves by one of two synthetic processes, or replays a real Kalshi price path (`--prob-path`, see below). Default (`--prob-process additive`): a Gaussian random walk (σ=0.01 per step) with occasional jumps (2% chance of a σ=0.05 shock), clamped to [0.01, 0.99] — simple, but the clamp induces drift near the bounds. Alternative (`--prob-process martingale`): `Δp = σ·p(1−p)·Z` with vol matched to the additive process at p=0.6 — a true martingale that stays in (0, 1) naturally (the safety clamp at 1e-6 binds only on rare boundary-hugging steps, where its P&L effect is ~1e-6). Clip counts are tracked in both cases. At the end of a run the event outcome is drawn `Y ~ Bernoulli(p_true(T))` and all open inventory settles at Y.
 
 **Signals.** The MM observes a public signal `p_true + N(0, σ_pub)` (default σ_pub=0.05). Informed traders observe a private signal with σ_priv=0.02. Calibration bias is added to the MM's estimate: `mm_estimate = clamp(public_signal + bias)`.
 
@@ -105,13 +105,33 @@ python3 python/settlement_drift_check.py    # martingale process validation
 
 Every run is fully determined by `(seed, config)`; per-component RNG streams are derived from the base seed. Sweeps run 30 seeds per parameter point and report means with 95% CIs.
 
+## Real data: Kalshi replay
+
+The latent probability can be a real market instead of a synthetic process. `python/kalshi.py` pulls a binary contract's price history from Kalshi's public trade API (unauthenticated GET endpoints only: markets, trades, candlesticks; nothing is placed or sent) and writes a replay path; the binary consumes it with `--prob-path`, and a settled market's real result replaces the settlement draw with `--outcome yes|no`.
+
+```bash
+python3 python/kalshi.py list --series KXBTCD --status settled        # find tickers
+python3 python/kalshi.py fetch --ticker KXBTCD-25SEP2717-T115999.99 --interval 1
+#   -> data/kalshi/<ticker>_path.csv, <ticker>_meta.json, raw JSON under data/kalshi/raw/
+python3 python/kalshi.py stats                                        # path vol / jump rate vs the synthetic defaults
+./eventedge --prob-path data/kalshi/<ticker>_path.csv --outcome yes --bias 0.05 --out-prefix data/demo_replay
+python3 python/kalshi_replay.py                                       # bias sweep on every fetched market
+```
+
+A path is one row per simulator step (`time_step,timestamp,latent_probability`): 1-minute candles give 1440 steps a day, hourly candles ~720 a month. Candles use the period's last trade, else the bid/ask midpoint, forward-filled; `--source trades` resamples raw trades onto the grid instead. `--steps` defaults to the path length and may not exceed it. Seeds still vary the signals and trader arrivals, so 30 seeds on one path measure adverse selection against that path; the path itself never changes. Two things to keep in mind when reading replay results:
+
+- With `--outcome yes|no` every seed settles the same way, so a single market's P&L-vs-bias curve is dominated by which side the MM's inventory ended on. Compare across many settled markets, or use `--outcome draw` to isolate the quoting channels.
+- Kalshi prices are 1–99 cents, so the [0.01, 0.99] clamp never binds on real data; `kalshi.py stats` reports the per-step vol and jump rate so the synthetic processes (σ 0.01, jumps 2%) can be calibrated to real markets rather than guessed.
+
+The summary CSV gains two columns, `outcome_source` (`draw`/`forced`) and `prob_path`. Tests: `tests/test_kalshi.py` (normalisation on recorded response shapes, pagination/retry against a local fake server, and the replay round trip through the binary; registered with ctest).
+
 ## Layout
 
 ```
 include/, src/    C++ simulation core (probability process, traders, MM, matching)
 tests/            dependency-free unit tests (run via ctest)
-python/           experiment orchestration and analysis
-data/             raw run output (generated)
+python/           experiment orchestration and analysis; kalshi.py is the data layer
+data/             raw run output and fetched Kalshi paths (generated)
 results/          charts and aggregated CSVs (generated)
 ```
 

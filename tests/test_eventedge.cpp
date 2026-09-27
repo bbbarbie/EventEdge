@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstddef>
 #include <optional>
 #include <vector>
 
@@ -372,6 +373,54 @@ void test_martingale_process_has_no_drift() {
 
 // --- Trader behavior --------------------------------------------------------
 
+// Replay mode is the bridge to real Kalshi data: the path *is* the latent
+// truth, so every value must be reproduced exactly, in order, with the last
+// value held once the path is exhausted, and out-of-range rows clamped like
+// the additive process does.
+void test_replay_process_follows_path_exactly() {
+    SimConfig config = test_config();
+    config.prob_process = ProbProcess::REPLAY;
+    EventProbabilityProcess process(config);
+    process.set_replay_path({0.50, 0.55, 0.61, 0.005, 0.999, 0.42});
+    CHECK(process.replay_length() == 6);
+    CHECK_NEAR(process.true_prob(), 0.50, 1e-15);  // primed with the first row
+
+    const double expected[] = {0.50, 0.55, 0.61, 0.01, 0.99, 0.42};
+    for (int i = 0; i < 6; ++i) {
+        process.step();
+        CHECK_NEAR(process.true_prob(), expected[i], 1e-15);
+        CHECK(process.replay_position() == static_cast<std::size_t>(i + 1));
+        const double pub = process.public_signal();
+        CHECK(pub >= 0.0 && pub <= 1.0);
+    }
+    CHECK(process.clip_count() == 2);
+
+    for (int i = 0; i < 10; ++i) {
+        process.step();
+        CHECK_NEAR(process.true_prob(), 0.42, 1e-15);  // holds after the end
+    }
+    CHECK(process.replay_position() == 6);
+}
+
+// Two processes replaying the same path must agree step for step, and the
+// replayed truth must not depend on the seed (only the signals do).
+void test_replay_process_is_seed_independent() {
+    SimConfig a = test_config();
+    SimConfig b = test_config();
+    b.random_seed = a.random_seed + 1000;
+    EventProbabilityProcess pa(a);
+    EventProbabilityProcess pb(b);
+    const std::vector<double> path = {0.3, 0.35, 0.4, 0.38, 0.45};
+    pa.set_replay_path(path);
+    pb.set_replay_path(path);
+    for (std::size_t i = 0; i < path.size(); ++i) {
+        pa.step();
+        pb.step();
+        CHECK_NEAR(pa.true_prob(), pb.true_prob(), 0.0);
+        CHECK_NEAR(pa.true_prob(), path[i], 1e-15);
+    }
+}
+
 void test_informed_trader_may_decline_to_trade() {
     SimConfig config = test_config();
     config.informed_fraction = 1.0;  // every arrival is informed
@@ -449,6 +498,8 @@ int main() {
     test_inventory_aware_quotes_stay_bounded();
     test_martingale_process_bounds_no_clipping();
     test_martingale_process_has_no_drift();
+    test_replay_process_follows_path_exactly();
+    test_replay_process_is_seed_independent();
     test_informed_trader_may_decline_to_trade();
     test_informed_trader_direction();
     test_seeded_runs_are_reproducible();
