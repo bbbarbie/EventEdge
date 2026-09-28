@@ -148,6 +148,10 @@ Three things to read off. First, the GM quoter breaks even (as the regret-free c
 The sniping loss grows linearly at about 0.027 per step of latency per jump, and inside the stale windows 41% of fills are informed against 34% overall. The background also creeps up with L because a slow quoter is also slow to follow the diffusion, not just the jumps. The same script takes `--prob-path` to run on a Kalshi path, where the jump timestamps are the market's own.
 
 
+## Validation study (Tasks A–B)
+
+`results.md` is the full log of the martingale validation and the calibration-error × informed-flow factorial, with every number carrying N and a standard error: the clipped process is biased by up to 36 pp at settlement while the p(1−p) process is flat within 0.1 pp; the asymmetry in the sign of the calibration error decomposes into a clipping artifact (settlement drift) and a boundary-truncation effect of the MM's own estimate clamp. Scripts under `experiments/` reproduce every table and figure from fixed seeds.
+
 ## Model
 
 **Latent probability.** A hidden true probability `p_true` evolves by one of two synthetic processes, or replays a real Kalshi price path (`--prob-path`, see below). Default (`--prob-process additive`): a Gaussian random walk (σ=0.01 per step) with occasional jumps (2% chance of a σ=0.05 shock), clamped to [0.01, 0.99] — simple, but the clamp induces drift near the bounds. Alternative (`--prob-process martingale`): `Δp = σ·p(1−p)·Z` with vol matched to the additive process at p=0.6 — a true martingale that stays in (0, 1) naturally (the safety clamp at 1e-6 binds only on rare boundary-hugging steps, where its P&L effect is ~1e-6). Clip counts are tracked in both cases. At the end of a run the event outcome is drawn `Y ~ Bernoulli(p_true(T))` and all open inventory settles at Y.
