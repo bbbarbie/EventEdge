@@ -307,29 +307,6 @@ whole asymmetry story in Task B.
 E[p_T] confirms A1 inside the trading runs: from p₀ = 0.2 the clipped process ends at
 0.423 ± 0.003 and the martingale at 0.196 ± 0.003.
 
-## 5. Task C — replayed Kalshi paths vs synthetic (not run)
-
-Not run. Two blockers, both outside the ground rules to fix here:
-
-1. **No replayed markets are available.** This environment's network policy denies
-   `api.elections.kalshi.com` (CONNECT 403), so `python/kalshi.py fetch` cannot pull a
-   path and `data/kalshi/` is empty. The replay mode itself (`--prob-path`,
-   `--outcome`) is built and tested (`tests/test_kalshi.py`, round trip through the
-   binary), so Task C can be run on any machine with access:
-   `python3 python/kalshi.py fetch --ticker <T> --interval 1` for each market, then a
-   Task C script that pairs each `<T>_path.csv` with a synthetic martingale path whose
-   σ is set from `kalshi.py stats` (`martingale_vol`) and the same seeds.
-2. **Peek-ahead informed traders are a feature.** The informed trader as implemented
-   observes the current latent level with noise (definition (2)); trading "in the
-   direction of the next replayed move with probability π" would be a new information
-   mode in `src/trader_agents.cpp`. The task says not to add features, so the
-   definition is recorded here for when it is: on a replayed path, an informed arrival
-   at step t would buy if `p_{t+1} > p_t` and sell if `p_{t+1} < p_t` (no trade on a
-   flat step), with the same edge threshold against the quote, and the σ-matched
-   synthetic control would use the existing noisy-level informed trader, so the two
-   would differ in information structure as well as in path — that confound should
-   be split by also running the peek-ahead trader on the synthetic path.
-
 ## 4. Task B — calibration error × informed flow → adverse selection and P&L
 
 Script: `experiments/task_b_factorial.py --seeds 2000`. 168 cells × 2,000 seeds =
@@ -814,7 +791,7 @@ Reflection: max |z| over 56 cell pairs: P&L 1.30, marked 1.63, fills 1.62, infor
 
 #### B2(d). P&L per contract conditional on the settlement outcome, by ε (pooled over π and p₀), settled P&L
 
-| process | ε | P(YES) | P&L | YES | P&L | NO | difference YES−NO |
+| process | ε | P(YES) | P&L given YES | P&L given NO | difference YES−NO |
 |---|---|---|---|---|---|
 | additive | -0.10 | 0.495 | -0.2769 ± 0.0013 | +0.2066 ± 0.0012 | -0.4835 ± 0.0017 |
 | additive | -0.05 | 0.495 | -0.1837 ± 0.0010 | +0.1612 ± 0.0010 | -0.3450 ± 0.0014 |
@@ -830,6 +807,29 @@ Reflection: max |z| over 56 cell pairs: P&L 1.30, marked 1.63, fills 1.62, infor
 | martingale | +0.02 | 0.500 | +0.0448 ± 0.0004 | -0.0528 ± 0.0005 | +0.0976 ± 0.0006 |
 | martingale | +0.05 | 0.500 | +0.0946 ± 0.0008 | -0.1165 ± 0.0009 | +0.2110 ± 0.0012 |
 | martingale | +0.10 | 0.500 | +0.1200 ± 0.0011 | -0.1838 ± 0.0012 | +0.3039 ± 0.0016 |
+
+## 5. Task C — replayed Kalshi paths vs synthetic (not run)
+
+Not run. Two blockers, both outside the ground rules to fix here:
+
+1. **No replayed markets are available.** This environment's network policy denies
+   `api.elections.kalshi.com` (CONNECT 403), so `python/kalshi.py fetch` cannot pull a
+   path and `data/kalshi/` is empty. The replay mode itself (`--prob-path`,
+   `--outcome`) is built and tested (`tests/test_kalshi.py`, round trip through the
+   binary), so Task C can be run on any machine with access:
+   `python3 python/kalshi.py fetch --ticker <T> --interval 1` for each market, then a
+   Task C script that pairs each `<T>_path.csv` with a synthetic martingale path whose
+   σ is set from `kalshi.py stats` (`martingale_vol`) and the same seeds.
+2. **Peek-ahead informed traders are a feature.** The informed trader as implemented
+   observes the current latent level with noise (definition (2)); trading "in the
+   direction of the next replayed move with probability π" would be a new information
+   mode in `src/trader_agents.cpp`. The task says not to add features, so the
+   definition is recorded here for when it is: on a replayed path, an informed arrival
+   at step t would buy if `p_{t+1} > p_t` and sell if `p_{t+1} < p_t` (no trade on a
+   flat step), with the same edge threshold against the quote, and the σ-matched
+   synthetic control would use the existing noisy-level informed trader, so the two
+   would differ in information structure as well as in path — that confound should
+   be split by also running the peek-ahead trader on the synthetic path.
 
 ## 6. Resume numbers
 
